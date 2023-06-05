@@ -74,7 +74,7 @@ docker-compose exec backed python manage.py load_data
 cp .env.example .env
 ```
 
-### Документация API YaMDb
+### Документация API Foodgram
 
 С полной документацией можно ознакомиться по адресу
 [http://62.84.123.80/api/docs/](http://62.84.123.80/api/docs/)
