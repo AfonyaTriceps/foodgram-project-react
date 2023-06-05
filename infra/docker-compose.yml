@@ -22,7 +22,7 @@ services:
   frontend:
     image: afonya9/foodgram-frontend:latest
     volumes:
-      - $HOME/frontend/:/app/result_build/
+      - ../frontend/:/app/result_build/
 
   nginx:
     image: nginx:1.19.3
