@@ -130,5 +130,5 @@ class RecipeViewSet(viewsets.ModelViewSet):
                         shop_cart[point_name] = r.amount
 
             for name, amount in shop_cart.items():
-                f.write(f'- {name.title()} - {amount}\n')
+                f.write(f'* {name.title()} - {amount}\n')
         return FileResponse(open(file, 'rb'), as_attachment=True)
