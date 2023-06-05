@@ -77,4 +77,4 @@ cp .env.example .env
 ### Документация API YaMDb
 
 С полной документацией можно ознакомиться по адресу
-[http://localhost:8000/redoc/](http://localhost:8000/redoc/)
+[http://62.84.123.80/api/docs/](http://62.84.123.80/api/docs/)
