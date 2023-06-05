@@ -9,7 +9,7 @@ services:
       - ./.env
 
   backend:
-    image: afonya9/foodgram:latest
+    image: afonya9/foodgram-backend:latest
     restart: always
     volumes:
       - static_value:/app/static/
