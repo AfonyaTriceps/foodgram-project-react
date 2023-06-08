@@ -1,10 +1,9 @@
 from djoser.views import UserViewSet
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.decorators import action
-from rest_framework.generics import ListAPIView, get_object_or_404
+from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from api.pagination import LimitPageNumberPagination
 from api.serializers import FollowSerializer
@@ -12,59 +11,49 @@ from users.models import Follow, User
 from users.serializers import CustomUserSerializer
 
 
-class CustomUserViewSet(UserViewSet):
-    queryset = User.objects.all()
-    serializer_class = CustomUserSerializer
+class UsersView(UserViewSet):
     permission_classes = (IsAuthenticatedOrReadOnly,)
-
-
-class UsersView(APIView):
-    serializer_class = FollowSerializer
-    permission_classes = (IsAuthenticated,)
     pagination_class = LimitPageNumberPagination
+    serializer_class = CustomUserSerializer
+    queryset = User.objects.all()
 
-    def post(self, request, *args, **kwargs):
-        user_id = self.kwargs.get('user_id')
-        if user_id == request.user.id:
+    @action(
+        detail=True,
+        methods=('POST', 'DELETE'),
+        permission_classes=(IsAuthenticated,),
+    )
+    def subscribe(self, request, id):
+        author = get_object_or_404(User, pk=id)
+        if request.method == 'POST':
+            if author == request.user:
+                raise serializers.ValidationError(
+                    'Нельзя подписаться на самого себя',
+                )
+            Follow.objects.create(user=request.user, author=author)
             return Response(
-                {'error': 'Нельзя подписаться на себя'},
-                status=status.HTTP_400_BAD_REQUEST,
+                {'detail': 'Вы подписались на пользователя.'},
+                status=status.HTTP_201_CREATED,
             )
-        if Follow.objects.filter(
-            user=request.user,
-            author_id=user_id,
-        ).exists():
+
+        if request.method == 'DELETE':
+            obj = get_object_or_404(Follow, user=request.user, author=author)
+            obj.delete()
             return Response(
-                {'error': 'Вы уже подписаны на пользователя'},
-                status=status.HTTP_400_BAD_REQUEST,
+                {'detail': 'Вы отписались от пользователя.'},
+                status=status.HTTP_204_NO_CONTENT,
             )
-        author = get_object_or_404(User, id=user_id)
-        Follow.objects.create(user=request.user, author_id=user_id)
-        return Response(
-            self.serializer_class(author, context={'request': request}).data,
-            status=status.HTTP_201_CREATED,
+
+    @action(
+        detail=False,
+        methods=['GET'],
+        permission_classes=(IsAuthenticated,),
+    )
+    def subscriptions(self, request):
+        queryset = Follow.objects.filter(user=request.user)
+        pages = self.paginate_queryset(queryset)
+        serializer = FollowSerializer(
+            pages,
+            many=True,
+            context={'request': request},
         )
-
-    def delete(self, request, *args, **kwargs):
-        user_id = self.kwargs.get('user_id')
-        subscription = Follow.objects.filter(
-            user=request.user,
-            author=get_object_or_404(User, id=user_id),
-        )
-        if subscription.exists():
-            subscription.delete()
-            return Response(status=status.HTTP_204_NO_CONTENT)
-        return Response(
-            {'error': 'Вы не подписаны на пользователя'},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-
-class UsersListView(ListAPIView):
-    serializer_class = FollowSerializer
-    permission_classes = (IsAuthenticated,)
-    pagination_class = LimitPageNumberPagination
-
-    @action(detail=False, methods=['GET'], url_path='subscriptions')
-    def get_queryset(self):
-        return User.objects.filter(following__user=self.request.user)
+        return self.get_paginated_response(serializer.data)

@@ -1,3 +1,7 @@
+import codecs
+import csv
+from collections import defaultdict
+
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
@@ -16,38 +20,31 @@ from api.serializers import (
     ShortRecipeSerializer,
     TagSerializer,
 )
-from recipes.models import (
-    Favorite,
-    Ingredient,
-    Recipe,
-    RecipeIngredients,
-    ShoppingCart,
-    Tag,
-)
+from recipes.models import Favorite, Ingredient, Recipe, ShoppingCart, Tag
 
 
 class TagViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Tag.objects.all()
-    serializer_class = TagSerializer
     permission_classes = (permissions.AllowAny,)
     pagination_class = None
+    queryset = Tag.objects.all()
+    serializer_class = TagSerializer
 
 
 class IngredientViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Ingredient.objects.all()
-    serializer_class = IngredientSerializer
-    permission_classes = (permissions.AllowAny,)
-    pagination_class = None
     filter_backends = (DjangoFilterBackend,)
     filterset_class = IngredientFilter
+    permission_classes = (permissions.AllowAny,)
+    pagination_class = None
+    queryset = Ingredient.objects.all()
+    serializer_class = IngredientSerializer
 
 
 class RecipeViewSet(viewsets.ModelViewSet):
-    queryset = Recipe.objects.all()
-    permission_classes = (IsAuthorAdminOrReadOnly,)
-    pagination_class = LimitPageNumberPagination
     filter_backends = (DjangoFilterBackend,)
     filterset_class = RecipeFilter
+    permission_classes = (IsAuthorAdminOrReadOnly,)
+    pagination_class = LimitPageNumberPagination
+    queryset = Recipe.objects.all()
 
     def perform_create(self, serializer):
         serializer.save(author=self.request.user)
@@ -57,54 +54,50 @@ class RecipeViewSet(viewsets.ModelViewSet):
             return RecipeReadSerializer
         return RecipeWriteSerializer
 
-    def add_to(self, model, user, pk):
-        if model.objects.filter(user=user, recipe__id=pk).exists():
-            return Response(
-                {'errors': 'Рецепт уже добавлен!'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+    def favorite_and_shopping_cart_actions(self, request, pk, model):
         recipe = get_object_or_404(Recipe, id=pk)
-        model.objects.create(user=user, recipe=recipe)
-        serializer = ShortRecipeSerializer(recipe)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        if request.method == 'POST':
+            serializer = ShortRecipeSerializer(
+                recipe,
+                request.data,
+                context={'request': request},
+            )
+            serializer.is_valid(raise_exception=True)
+            if model.objects.filter(user=request.user, recipe__id=pk).exists():
+                return Response(
+                    {'errors': 'Рецепт уже добавлен!'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            model.objects.create(user=request.user, recipe=recipe)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-    def delete_from(self, model, user, pk):
-        obj = model.objects.filter(user=user, recipe__id=pk)
-        if obj.exists():
+        if request.method == 'DELETE':
+            obj = get_object_or_404(model, user=request.user, recipe=recipe)
             obj.delete()
-            return Response(status=status.HTTP_204_NO_CONTENT)
-        return Response(
-            {'errors': 'Рецепт уже удален!'},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+            return Response(
+                {'detail': 'Рецепт удален.'},
+                status=status.HTTP_204_NO_CONTENT,
+            )
 
     @action(
         detail=True,
-        methods=(
-            'post',
-            'delete',
-        ),
+        methods=('POST', 'DELETE'),
         permission_classes=(IsAuthenticated,),
     )
     def favorite(self, request, pk):
-        if request.method == 'POST':
-            return self.add_to(Favorite, request.user, pk)
-        else:
-            return self.delete_from(Favorite, request.user, pk)
+        return self.favorite_and_shopping_cart_actions(request, pk, Favorite)
 
     @action(
         detail=True,
-        methods=(
-            'post',
-            'delete',
-        ),
+        methods=('POST', 'DELETE'),
         permission_classes=(IsAuthenticated,),
     )
     def shopping_cart(self, request, pk):
-        if request.method == 'POST':
-            return self.add_to(ShoppingCart, request.user, pk)
-        else:
-            return self.delete_from(ShoppingCart, request.user, pk)
+        return self.favorite_and_shopping_cart_actions(
+            request,
+            pk,
+            ShoppingCart,
+        )
 
     @action(
         detail=False,
@@ -112,23 +105,33 @@ class RecipeViewSet(viewsets.ModelViewSet):
         permission_classes=(IsAuthenticated,),
     )
     def download_shopping_cart(self, request):
-        user = request.user
-        purchases = ShoppingCart.objects.filter(user=user)
-        file = 'shopping-list.txt'
-        with open(file, 'w') as f:
-            shop_cart = dict()
-            for purchase in purchases:
-                ingredients = RecipeIngredients.objects.filter(
-                    recipe=purchase.recipe.id,
-                )
-                for r in ingredients:
-                    i = Ingredient.objects.get(pk=r.ingredient.id)
-                    point_name = f'{i.name} ({i.measurement_unit})'
-                    if point_name in shop_cart.keys():
-                        shop_cart[point_name] += r.amount
-                    else:
-                        shop_cart[point_name] = r.amount
+        shopping_cart = (
+            ShoppingCart.objects.filter(
+                user=request.user,
+            )
+            .select_related('recipe')
+            .prefetch_related('recipe__recipe_ingredients')
+        )
+        ingredients = defaultdict(int)
 
-            for name, amount in shop_cart.items():
-                f.write(f'* {name.title()} - {amount}\n')
-        return FileResponse(open(file, 'rb'), as_attachment=True)
+        for item in shopping_cart:
+            recipe_ingredients = item.recipe.recipe_ingredients.all()
+            for ingredient in recipe_ingredients:
+                key = ingredient.ingredient_id
+                ingredients[key] += ingredient.amount
+
+        with codecs.open('shopping_cart.csv', 'w', 'utf-8-sig') as file:
+            writer = csv.writer(file, dialect='excel')
+            writer.writerow(['Ингредиент (единица измерения) - количество'])
+
+            for ingredient_id, amount in ingredients.items():
+                ingredient = Ingredient.objects.get(pk=ingredient_id)
+                writer.writerow(
+                    [
+                        f'{ingredient.name} ({ingredient.measurement_unit}) - {amount}',
+                    ],
+                )
+        return FileResponse(
+            open('shopping_cart.csv', 'rb'),
+            as_attachment=True,
+        )
