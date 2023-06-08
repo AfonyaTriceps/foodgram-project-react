@@ -128,7 +128,7 @@ class RecipeViewSet(viewsets.ModelViewSet):
                 ingredient = Ingredient.objects.get(pk=ingredient_id)
                 writer.writerow(
                     [
-                        f'{ingredient.name} ({ingredient.measurement_unit}) - {amount}',
+                        f'● {ingredient.name} ({ingredient.measurement_unit}) - {amount}',
                     ],
                 )
         return FileResponse(
