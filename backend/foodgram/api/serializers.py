@@ -83,21 +83,23 @@ class RecipeReadSerializer(serializers.ModelSerializer):
             'is_in_shopping_cart',
         )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.request = self.context.get('request')
+
     def get_is_favorited(self, obj):
-        request = self.context.get('request')
-        if request.user.is_anonymous:
+        if self.request.user.is_anonymous:
             return False
         return Favorite.objects.filter(
-            user=request.user,
+            user=self.request.user,
             recipe=obj.id,
         ).exists()
 
     def get_is_in_shopping_cart(self, obj):
-        request = self.context.get('request')
-        if request.user.is_anonymous:
+        if self.request.user.is_anonymous:
             return False
         return ShoppingCart.objects.filter(
-            user=request.user,
+            user=self.request.user,
             recipe=obj.id,
         ).exists()
 
@@ -251,7 +253,7 @@ class FollowSerializer(serializers.ModelSerializer):
         limit = self.request.GET.get('recipes_limit')
         queryset = Recipe.objects.filter(author=obj.author)
         if limit:
-            queryset = queryset[: int(limit)]
+            queryset = queryset[:int(limit)]
         return ShortRecipeSerializer(queryset, many=True).data
 
     def get_recipes_count(self, obj):

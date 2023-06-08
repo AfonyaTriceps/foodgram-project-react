@@ -36,8 +36,8 @@ class UsersView(UserViewSet):
             )
 
         if request.method == 'DELETE':
-            obj = get_object_or_404(Follow, user=request.user, author=author)
-            obj.delete()
+            follower = get_object_or_404(Follow, user=request.user, author=author).delete()
+            follower.delete()
             return Response(
                 {'detail': 'Вы отписались от пользователя.'},
                 status=status.HTTP_204_NO_CONTENT,
@@ -50,9 +50,9 @@ class UsersView(UserViewSet):
     )
     def subscriptions(self, request):
         queryset = Follow.objects.filter(user=request.user)
-        pages = self.paginate_queryset(queryset)
+        pages_queryset = self.paginate_queryset(queryset)
         serializer = FollowSerializer(
-            pages,
+            pages_queryset,
             many=True,
             context={'request': request},
         )
