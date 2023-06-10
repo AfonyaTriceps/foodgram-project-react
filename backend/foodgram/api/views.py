@@ -59,40 +59,39 @@ class RecipeFavoriteView(BaseRetrieveDestroyViewSetView):
         return Favorite
 
 
-class ShoppingCartView(BaseRetrieveDestroyViewSetView):
-    queryset = ShoppingCart.objects.all()
-    serializer_class = MiniRecipeSerializer
-    permission_classes = (permissions.IsAuthenticated,)
-
-    def get_model(self):
-        return ShoppingCart
-
-
 class ShoppingCartListView(ListViewSet):
     queryset = ShoppingCart.objects.all()
     permission_classes = (permissions.IsAuthenticated,)
 
     def get(self, request):
         shopping_cart = (
-            ShoppingCart.objects.filter(
-                user=request.user,
-            )
+            ShoppingCart.objects.filter(user=request.user)
             .select_related('recipe')
             .prefetch_related('recipe__recipe_ingredients')
         )
-        ingredients = defaultdict(int)
+        ingredients = []
         for item in shopping_cart:
-            recipe_ingredients = item.recipe.recipe_ingredients.all()
-            for ingredient in recipe_ingredients:
-                ingredient_key = ingredient.ingredient_id
-                ingredients[ingredient_key] += ingredient.amount
+            for ingredient in item.recipe.recipe_ingredients.all():
+                found = False
+                for ing in ingredients:
+                    if ing['id'] == ingredient.ingredient_id:
+                        ing['amount'] += ingredient.amount
+                        found = True
+                        break
+                if not found:
+                    ingredients.append(
+                        {
+                            'id': ingredient.ingredient_id,
+                            'amount': ingredient.amount,
+                        },
+                    )
 
-        content = 'Ингредиент (единица измерения) - количество\n'
-        for ingredient_id, amount in ingredients.items():
-            ingredient = Ingredient.objects.get(pk=ingredient_id)
-            content += f'● {ingredient.name} ({ingredient.measurement_unit}) - {amount}\n'
+        line = 'Ингредиент (единица измерения) - количество\n'
+        for ingredient in ingredients:
+            ing = Ingredient.objects.get(pk=ingredient['id'])
+            line += f'● {ing.name} ({ing.measurement_unit}) - {ingredient["amount"]}\n'
 
-        response = HttpResponse(content, content_type='text/plain')
+        response = HttpResponse(line, content_type='text/plain')
         response[
             'Content-Disposition'
         ] = 'attachment; filename=shopping_cart.txt'
