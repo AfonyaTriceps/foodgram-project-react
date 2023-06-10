@@ -76,4 +76,4 @@ cp .env.example .env
 ### Документация API Foodgram
 
 С полной документацией можно ознакомиться по адресу
-[http://158.160.20.92/api/docs/](http://158.160.20.92/api/docs/)
+[http://localhost/api/docs/](http://localhost/api/docs/)
