@@ -1,7 +1,7 @@
 from drf_extra_fields.fields import Base64ImageField
-from rest_framework import exceptions, serializers
-from rest_framework.validators import UniqueTogetherValidator
+from rest_framework import serializers
 
+from api.fields import Hex2NameColor
 from recipes.models import (
     Favorite,
     Ingredient,
@@ -14,26 +14,81 @@ from users.models import Follow
 from users.serializers import CustomUserSerializer
 
 
+class MiniRecipeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Recipe
+        fields = ('id', 'name', 'image', 'cooking_time')
+        read_only_fields = ('id', 'name', 'image', 'cooking_time')
+
+
+class FollowSerializer(serializers.ModelSerializer):
+    id = serializers.ReadOnlyField(source='author.id')
+    email = serializers.ReadOnlyField(source='author.email')
+    username = serializers.ReadOnlyField(source='author.username')
+    first_name = serializers.ReadOnlyField(source='author.first_name')
+    last_name = serializers.ReadOnlyField(source='author.last_name')
+    is_subscribed = serializers.SerializerMethodField()
+    recipes = serializers.SerializerMethodField()
+    recipes_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Follow
+        fields = (
+            'id',
+            'email',
+            'username',
+            'first_name',
+            'last_name',
+            'is_subscribed',
+            'recipes',
+            'recipes_count',
+        )
+
+    def validate_following(self, author):
+        if self.context.get('request').user == author:
+            raise serializers.ValidationError(
+                'Вы не можете подписаться на самого себя!',
+            )
+        return author
+
+    def get_is_subscribed(self, obj):
+        user = self.context.get('request').user
+        print(user, obj)
+        if user.is_authenticated:
+            return Follow.objects.filter(user=user, author=obj.author).exists()
+        return False
+
+    def get_recipes(self, obj):
+        recipes_limit = self.context.get('request').query_params.get(
+            'recipes_limit',
+        )
+        recipes = Recipe.objects.filter(author=obj.author)
+        recipes = recipes[:int(recipes_limit)]
+        serializer = MiniRecipeSerializer(
+            recipes,
+            many=True,
+        )
+        return serializer.data
+
+    def get_recipes_count(self, obj):
+        return Recipe.objects.filter(author=obj.author).count()
+
+
+class TagSerializer(serializers.ModelSerializer):
+    color = Hex2NameColor()
+
+    class Meta:
+        model = Tag
+        fields = ('id', 'name', 'color', 'slug')
+
+
 class IngredientSerializer(serializers.ModelSerializer):
     class Meta:
         model = Ingredient
         fields = ('id', 'name', 'measurement_unit')
 
 
-class TagSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Tag
-        fields = ('id', 'name', 'color', 'slug')
-
-
-class ShortRecipeSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Recipe
-        fields = ('id', 'name', 'image', 'cooking_time')
-        read_only_fields = ('image', 'name', 'cooking_time')
-
-
-class RecipeIngredientsReadSerializer(serializers.ModelSerializer):
+class RecipeIngredientsSerializer(serializers.ModelSerializer):
     id = serializers.ReadOnlyField(source='ingredient.id')
     name = serializers.ReadOnlyField(source='ingredient.name')
     measurement_unit = serializers.ReadOnlyField(
@@ -43,18 +98,21 @@ class RecipeIngredientsReadSerializer(serializers.ModelSerializer):
     class Meta:
         model = RecipeIngredients
         fields = ('id', 'name', 'measurement_unit', 'amount')
-        validators = [
-            UniqueTogetherValidator(
-                queryset=RecipeIngredients.objects.all(),
-                fields=('ingredient', 'recipe'),
-            ),
-        ]
+        read_only_fields = ('amount',)
 
 
-class RecipeReadSerializer(serializers.ModelSerializer):
+class RecipeWriteIngredients(serializers.ModelSerializer):
+    id = serializers.IntegerField()
+
+    class Meta:
+        model = RecipeIngredients
+        fields = ('id', 'amount')
+
+
+class RecipeSerializer(serializers.ModelSerializer):
     tags = TagSerializer(many=True)
     author = CustomUserSerializer()
-    ingredients = RecipeIngredientsReadSerializer(
+    ingredients = RecipeIngredientsSerializer(
         many=True,
         source='recipe_ingredients',
     )
@@ -83,33 +141,17 @@ class RecipeReadSerializer(serializers.ModelSerializer):
             'is_in_shopping_cart',
         )
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.request = self.context.get('request')
+    def get_obj(self, obj, model):
+        user = self.context.get('request').user
+        if user.is_authenticated:
+            return model.objects.filter(user=user, recipe_id=obj.id).exists()
+        return False
 
     def get_is_favorited(self, obj):
-        if self.request.user.is_anonymous:
-            return False
-        return Favorite.objects.filter(
-            user=self.request.user,
-            recipe=obj.id,
-        ).exists()
+        return self.get_obj(obj, Favorite)
 
     def get_is_in_shopping_cart(self, obj):
-        if self.request.user.is_anonymous:
-            return False
-        return ShoppingCart.objects.filter(
-            user=self.request.user,
-            recipe=obj.id,
-        ).exists()
-
-
-class RecipeIngredientsWriteSerializer(serializers.ModelSerializer):
-    id = serializers.IntegerField(write_only=True)
-
-    class Meta:
-        model = RecipeIngredients
-        fields = ('id', 'amount')
+        return self.get_obj(obj, ShoppingCart)
 
 
 class RecipeWriteSerializer(serializers.ModelSerializer):
@@ -118,11 +160,8 @@ class RecipeWriteSerializer(serializers.ModelSerializer):
         many=True,
     )
     author = CustomUserSerializer(read_only=True)
-    ingredients = RecipeIngredientsWriteSerializer(
-        many=True,
-        source='recipe_ingredients',
-    )
-    image = Base64ImageField(max_length=None)
+    ingredients = RecipeWriteIngredients(many=True)
+    image = Base64ImageField()
 
     class Meta:
         model = Recipe
@@ -136,125 +175,74 @@ class RecipeWriteSerializer(serializers.ModelSerializer):
             'text',
             'cooking_time',
         )
-        read_only_fields = ('tags', 'author')
 
-    def validate_tags(self, value):
-        if not value:
-            raise exceptions.ValidationError('Необходимо выбрать тег!')
-        if len(set(value)) != len(value):
-            raise exceptions.ValidationError('Теги должны быть уникальными!')
-        return value
+    def validate_cooking_time(self, cooking_time):
+        if int(cooking_time) < 1:
+            raise serializers.ValidationError(
+                'Время не может быть отрицательным!',
+            )
+        return cooking_time
 
-    def validate_ingredients(self, value):
-        if not value:
-            raise exceptions.ValidationError('Необходимо выбрать ингредиент!')
-
-        ingredients_list = []
-        for item in value:
-            ingredient_id = item.get('id')
-            amount = item.get('amount')
-
-            if not amount:
-                raise exceptions.ValidationError(
-                    'Необходимо выбрать количество ингредиента!',
+    def validate_ingredients(self, ingredients):
+        if not ingredients:
+            raise serializers.ValidationError(
+                'Необходимо указать хотя бы один ингредиент.',
+            )
+        ingredient_set = set()
+        for ingredient in ingredients:
+            if ingredient.get['amount'] < 1:
+                raise serializers.ValidationError(
+                    'Количество ингредиента должно быть положительным числом.',
                 )
-            if ingredient_id in ingredients_list:
-                raise exceptions.ValidationError(
-                    'Ингредиенты не должны повторяться!',
+            ingredient_id = ingredient['id']
+            if ingredient_id in ingredient_set:
+                raise serializers.ValidationError(
+                    'Ингредиенты не должны повторяться.',
                 )
-            if int(amount) <= 0:
-                raise exceptions.ValidationError(
-                    'Количество ингредиента должно быть больше 0!',
-                )
-            ingredients_list.append(ingredient_id)
+            ingredient_set.add(ingredient_id)
+        return ingredients
 
-        return value
+    def validate_tags(self, tags):
+        if not tags:
+            raise serializers.ValidationError('Рецепт не может быть без тега!')
+        tag_set = set()
+        for tag in tags:
+            if tag in tag_set:
+                raise serializers.ValidationError('Теги не должны повторяться.')
+            tag_set.add(tag)
+        return tags
 
-    def ingredients_or_recipe(self, ingredients, recipe):
+    def create_ingredients_for_recipe(self, ingredients, recipe):
         for ingredient in ingredients:
             RecipeIngredients.objects.create(
                 recipe=recipe,
-                ingredient_id=ingredient.get('id'),
-                amount=ingredient.get('amount'),
+                ingredient_id=ingredient['id'],
+                amount=ingredient['amount'],
             )
 
     def create(self, validated_data):
-        ingredients = validated_data.pop('recipe_ingredients')
         tags = validated_data.pop('tags')
+        ingredients = validated_data.pop('ingredients')
         recipe = Recipe.objects.create(**validated_data)
         recipe.tags.set(tags)
-        self.ingredients_or_recipe(ingredients, recipe)
+        self.create_ingredients_for_recipe(ingredients, recipe)
         return recipe
 
     def update(self, instance, validated_data):
-        ingredients_data = validated_data.pop('recipe_ingredients', None)
-        tags = validated_data.pop('tags', None)
-
-        for key, value in validated_data.items():
-            setattr(instance, key, value)
-
-        if tags is not None:
-            instance.tags.set(tags)
-
-        if ingredients_data is not None:
-            instance.recipe_ingredients.all().delete()
-            self.ingredients_or_recipe(ingredients_data, instance)
-
+        tags = validated_data.pop('tags')
+        ingredients = validated_data.pop('ingredients')
+        instance.tags.set(tags)
+        instance.name = validated_data.get('name', instance.name)
+        instance.text = validated_data.get('text', instance.text)
+        instance.cooking_time = validated_data.get(
+            'cooking_time',
+            instance.cooking_time,
+        )
+        instance.image = validated_data.get('image', instance.image)
         instance.save()
+        RecipeIngredients.objects.filter(recipe=instance).delete()
+        self.create_ingredients_for_recipe(ingredients, instance)
         return instance
 
     def to_representation(self, instance):
-        return RecipeReadSerializer(
-            instance,
-            context={'request': self.context.get('request')},
-        ).data
-
-
-class FollowSerializer(serializers.ModelSerializer):
-    id = serializers.ReadOnlyField(source='author.id')
-    email = serializers.ReadOnlyField(source='author.email')
-    username = serializers.ReadOnlyField(source='author.username')
-    first_name = serializers.ReadOnlyField(source='author.first_name')
-    last_name = serializers.ReadOnlyField(source='author.last_name')
-    is_subscribed = serializers.SerializerMethodField()
-    recipes = serializers.SerializerMethodField()
-    recipes_count = serializers.SerializerMethodField()
-
-    class Meta:
-        model = Follow
-        fields = (
-            'id',
-            'email',
-            'username',
-            'first_name',
-            'last_name',
-            'is_subscribed',
-            'recipes',
-            'recipes_count',
-        )
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.request = self.context.get('request')
-
-    def validate_following(self, author):
-        if self.request.user == author:
-            raise serializers.ValidationError(
-                'Вы не можете подписаться на самого себя!',
-            )
-        return author
-
-    def get_is_subscribed(self, obj):
-        if self.request.user.is_anonymous:
-            return False
-        return Follow.objects.filter(user=obj.user, author=obj.author).exists()
-
-    def get_recipes(self, obj):
-        limit = self.request.GET.get('recipes_limit')
-        queryset = Recipe.objects.filter(author=obj.author)
-        if limit:
-            queryset = queryset[:int(limit)]
-        return ShortRecipeSerializer(queryset, many=True).data
-
-    def get_recipes_count(self, obj):
-        return Recipe.objects.filter(author=obj.author).count()
+        return RecipeSerializer(instance, context=self.context).data

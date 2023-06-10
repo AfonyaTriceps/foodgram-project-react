@@ -7,8 +7,6 @@ from recipes.models import Ingredient
 
 
 class Command(BaseCommand):
-    help = 'Загрузка ингредиентов из csv файла'
-
     def handle(self, *args, **kwargs):
         data_path = settings.BASE_DIR
         with open(
@@ -20,8 +18,11 @@ class Command(BaseCommand):
             next(reader)
             for row in reader:
                 name, measurement_unit = row
-                Ingredient.objects.create(
-                    name=name,
-                    measurement_unit=measurement_unit,
-                )
-        self.stdout.write(self.style.SUCCESS('Все ингредиенты загружены!'))
+                if not Ingredient.objects.filter(name=name).exists():
+                    Ingredient.objects.create(
+                        name=name,
+                        measurement_unit=measurement_unit,
+                    )
+        self.stdout.write(
+            self.style.SUCCESS('Загрузка ингредиентов выполнена.'),
+        )

@@ -1,59 +1,60 @@
-from djoser.views import UserViewSet
-from rest_framework import serializers, status
-from rest_framework.decorators import action
-from rest_framework.generics import get_object_or_404
-from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
+from rest_framework import permissions, status
 from rest_framework.response import Response
 
-from api.pagination import LimitPageNumberPagination
+from api.mixins import CreateDestroyListViewSet, ListViewSet
+from api.pagination import CustomPageNumberPagination
 from api.serializers import FollowSerializer
-from users.models import Follow, User
-from users.serializers import CustomUserSerializer
+from users.models import Follow
 
 
-class UsersView(UserViewSet):
-    permission_classes = (IsAuthenticatedOrReadOnly,)
-    pagination_class = LimitPageNumberPagination
-    serializer_class = CustomUserSerializer
-    queryset = User.objects.all()
+class FollowView(CreateDestroyListViewSet):
+    queryset = Follow.objects.all()
+    serializer_class = FollowSerializer
+    permission_classes = (permissions.IsAuthenticated,)
+    pagination_class = None
 
-    @action(
-        detail=True,
-        methods=('POST', 'DELETE'),
-        permission_classes=(IsAuthenticated,),
-    )
-    def subscribe(self, request, id):
-        author = get_object_or_404(User, pk=id)
-        if request.method == 'POST':
-            if author == request.user:
-                raise serializers.ValidationError(
-                    'Нельзя подписаться на самого себя',
-                )
-            Follow.objects.create(user=request.user, author=author)
+    def post(self, request, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        if request.user.id == kwargs.get('pk'):
             return Response(
-                {'detail': 'Вы подписались на пользователя.'},
-                status=status.HTTP_201_CREATED,
+                {'detail': 'Вы не можете подписаться на себя!'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if Follow.objects.filter(
+            user=request.user,
+            author_id=kwargs.get('pk'),
+        ).exists():
+            return Response(
+                {'detail': 'Вы уже подписаны на этого пользователя!'},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if request.method == 'DELETE':
-            follower = get_object_or_404(Follow, user=request.user, author=author).delete()
-            follower.delete()
+        serializer.save(user=request.user, author_id=kwargs.get('pk'))
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def delete(self, request, **kwargs):
+        try:
+            Follow.objects.get(
+                user=request.user,
+                author_id=kwargs.get('pk'),
+            ).delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except Follow.DoesNotExist:
             return Response(
-                {'detail': 'Вы отписались от пользователя.'},
-                status=status.HTTP_204_NO_CONTENT,
+                {'detail': 'Вы не подписаны на этого пользователя!'},
+                status=status.HTTP_404_NOT_FOUND,
             )
 
-    @action(
-        detail=False,
-        methods=['GET'],
-        permission_classes=(IsAuthenticated,),
-    )
-    def subscriptions(self, request):
-        queryset = Follow.objects.filter(user=request.user)
-        pages_queryset = self.paginate_queryset(queryset)
-        serializer = FollowSerializer(
-            pages_queryset,
-            many=True,
-            context={'request': request},
-        )
-        return self.get_paginated_response(serializer.data)
+
+class FollowListView(ListViewSet):
+    permission_classes = (permissions.IsAuthenticated,)
+    serializer_class = FollowSerializer
+    pagination_class = CustomPageNumberPagination
+    queryset = Follow.objects.all()
+
+    def get_queryset(self):
+        return Follow.objects.filter(user=self.request.user)
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)

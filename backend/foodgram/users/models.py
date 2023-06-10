@@ -1,4 +1,5 @@
 from django.contrib.auth.models import AbstractUser
+from django.core.validators import RegexValidator
 from django.db import models
 
 
@@ -9,37 +10,27 @@ class User(AbstractUser):
         'first_name',
         'last_name',
     )
-
-    username = models.CharField(
-        'имя пользователя',
-        max_length=150,
-        unique=True,
-        null=False,
-        blank=False,
-    )
     email = models.EmailField(
-        'почтовый адрес',
+        'почта',
         max_length=254,
         unique=True,
-        blank=False,
-        null=False,
+        help_text='Укажите email пользователя',
     )
-    first_name = models.CharField(
-        'имя',
-        max_length=150,
-        blank=False,
+    username = models.CharField(
+        'имя пользователя',
+        max_length=100,
+        validators=[
+            RegexValidator(
+                regex=r'^[\w.@+-]+$',
+                message='Недопустимый формат имени пользователя',
+            ),
+        ],
     )
-    last_name = models.CharField(
-        'фамилия',
-        max_length=150,
-        blank=False,
-    )
-    password = models.CharField(
-        verbose_name='Пароль',
-        max_length=150,
-    )
+    first_name = models.CharField('имя', max_length=150, blank=True)
+    last_name = models.CharField('фамилия', max_length=150, blank=True)
 
     class Meta:
+        ordering = ('email',)
         verbose_name = 'пользователь'
         verbose_name_plural = 'пользователи'
 
@@ -50,30 +41,26 @@ class User(AbstractUser):
 class Follow(models.Model):
     user = models.ForeignKey(
         User,
-        verbose_name='подписчик',
-        related_name='follower',
         on_delete=models.CASCADE,
+        related_name='follower',
+        verbose_name='подписчик',
     )
     author = models.ForeignKey(
         User,
-        verbose_name='автор',
-        related_name='following',
         on_delete=models.CASCADE,
+        related_name='following',
+        verbose_name='автор',
     )
 
     class Meta:
-        verbose_name = 'подписка'
-        verbose_name_plural = 'подписки'
         constraints = [
             models.UniqueConstraint(
                 fields=('user', 'author'),
-                name='unique_user_author',
-            ),
-            models.CheckConstraint(
-                check=~models.Q(user=models.F('author')),
-                name='subscription_no_self',
+                name='unique_subscription',
             ),
         ]
+        verbose_name = 'подписка'
+        verbose_name_plural = 'подписки'
 
-    def __str__(self) -> str:
+    def __str__(self):
         return f'Пользователь {self.user} подписан на {self.author}'
