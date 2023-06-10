@@ -57,6 +57,15 @@ class RecipeFavoriteView(BaseRetrieveDestroyViewSetView):
         return Favorite
 
 
+class ShoppingCartView(BaseRetrieveDestroyViewSetView):
+    queryset = ShoppingCart.objects.all()
+    serializer_class = MiniRecipeSerializer
+    permission_classes = (permissions.IsAuthenticated,)
+
+    def get_model(self):
+        return ShoppingCart
+
+
 class ShoppingCartListView(ListViewSet):
     queryset = ShoppingCart.objects.all()
     permission_classes = (permissions.IsAuthenticated,)
