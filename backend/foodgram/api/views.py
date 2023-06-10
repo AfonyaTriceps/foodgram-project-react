@@ -1,5 +1,3 @@
-from collections import defaultdict
-
 from django.http import HttpResponse
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import permissions, viewsets
