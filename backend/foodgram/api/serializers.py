@@ -190,7 +190,7 @@ class RecipeWriteSerializer(serializers.ModelSerializer):
             )
         ingredient_set = set()
         for ingredient in ingredients:
-            if ingredient.get['amount'] < 1:
+            if ingredient['amount'] < 1:
                 raise serializers.ValidationError(
                     'Количество ингредиента должно быть положительным числом.',
                 )
