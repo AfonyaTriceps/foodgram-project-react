@@ -1,3 +1,4 @@
+from django.conf import settings
 from drf_extra_fields.fields import Base64ImageField
 from rest_framework import serializers
 
@@ -44,6 +45,19 @@ class FollowSerializer(serializers.ModelSerializer):
             'recipes_count',
         )
 
+    def validate(self, data):
+        user = self.context['request'].user
+        author_id = self.context['view'].kwargs['pk']
+        if user.id == author_id:
+            raise serializers.ValidationError(
+                'Вы не можете подписаться на себя!',
+            )
+        if Follow.objects.filter(user=user, author_id=author_id).exists():
+            raise serializers.ValidationError(
+                'Вы уже подписаны на этого пользователя!',
+            )
+        return data
+
     def validate_following(self, author):
         if self.context.get('request').user == author:
             raise serializers.ValidationError(
@@ -53,17 +67,17 @@ class FollowSerializer(serializers.ModelSerializer):
 
     def get_is_subscribed(self, obj):
         user = self.context.get('request').user
-        print(user, obj)
         if user.is_authenticated:
-            return Follow.objects.filter(user=user, author=obj.author).exists()
+            return obj.author.following.filter(user=user).exists()
         return False
 
     def get_recipes(self, obj):
         recipes_limit = self.context.get('request').query_params.get(
             'recipes_limit',
         )
-        recipes = Recipe.objects.filter(author=obj.author)
-        recipes = recipes[:int(recipes_limit)]
+        recipes = obj.author.recipes.all()
+        if recipes_limit:
+            recipes = recipes[: int(recipes_limit)]
         serializer = MiniRecipeSerializer(
             recipes,
             many=True,
@@ -71,7 +85,7 @@ class FollowSerializer(serializers.ModelSerializer):
         return serializer.data
 
     def get_recipes_count(self, obj):
-        return Recipe.objects.filter(author=obj.author).count()
+        return obj.author.recipes.all().count()
 
 
 class TagSerializer(serializers.ModelSerializer):
@@ -107,6 +121,17 @@ class RecipeWriteIngredients(serializers.ModelSerializer):
     class Meta:
         model = RecipeIngredients
         fields = ('id', 'amount')
+
+    def validate_amount(self, amount):
+        if int(amount) < settings.MIN_FIELD_RESTRICTION:
+            raise serializers.ValidationError(
+                'Количество ингредиента должно быть больше 0!',
+            )
+        if int(amount) > settings.MAX_FIELD_RESTRICTION:
+            raise serializers.ValidationError(
+                'Количество ингредиента должно быть больше 32000!',
+            )
+        return amount
 
 
 class RecipeSerializer(serializers.ModelSerializer):
@@ -177,9 +202,13 @@ class RecipeWriteSerializer(serializers.ModelSerializer):
         )
 
     def validate_cooking_time(self, cooking_time):
-        if int(cooking_time) < 1:
+        if int(cooking_time) < settings.MIN_FIELD_RESTRICTION:
             raise serializers.ValidationError(
-                'Время не может быть отрицательным!',
+                'Время должно быть больше 0!',
+            )
+        if int(cooking_time) > settings.MAX_FIELD_RESTRICTION:
+            raise serializers.ValidationError(
+                'Время должно быть до 32000!',
             )
         return cooking_time
 
@@ -190,10 +219,6 @@ class RecipeWriteSerializer(serializers.ModelSerializer):
             )
         ingredient_set = set()
         for ingredient in ingredients:
-            if ingredient['amount'] < 1:
-                raise serializers.ValidationError(
-                    'Количество ингредиента должно быть положительным числом.',
-                )
             ingredient_id = ingredient['id']
             if ingredient_id in ingredient_set:
                 raise serializers.ValidationError(
@@ -205,20 +230,20 @@ class RecipeWriteSerializer(serializers.ModelSerializer):
     def validate_tags(self, tags):
         if not tags:
             raise serializers.ValidationError('Рецепт не может быть без тега!')
-        tag_set = set()
-        for tag in tags:
-            if tag in tag_set:
-                raise serializers.ValidationError('Теги не должны повторяться.')
-            tag_set.add(tag)
+        if len(set(tags)) != len(tags):
+            raise serializers.ValidationError('Теги не должны повторяться.')
         return tags
 
     def create_ingredients_for_recipe(self, ingredients, recipe):
-        for ingredient in ingredients:
-            RecipeIngredients.objects.create(
+        recipe_ingredients = [
+            RecipeIngredients(
                 recipe=recipe,
                 ingredient_id=ingredient['id'],
                 amount=ingredient['amount'],
             )
+            for ingredient in ingredients
+        ]
+        RecipeIngredients.objects.bulk_create(recipe_ingredients)
 
     def create(self, validated_data):
         tags = validated_data.pop('tags')

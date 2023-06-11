@@ -1,7 +1,7 @@
 from djoser.serializers import UserCreateSerializer, UserSerializer
 from rest_framework import serializers
 
-from users.models import Follow, User
+from users.models import User
 
 
 class CreateUserSerializer(UserCreateSerializer):
@@ -27,5 +27,5 @@ class CustomUserSerializer(UserSerializer):
     def get_is_subscribed(self, obj):
         user = self.context.get('request').user
         if user.is_authenticated:
-            return Follow.objects.filter(user=user, author_id=obj.id).exists()
+            return obj.following.filter(user=user).exists()
         return False

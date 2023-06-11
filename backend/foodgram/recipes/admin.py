@@ -1,14 +1,14 @@
 from django.contrib import admin
 
+from foodgram.inlines import RecipeIngredientInline
 from recipes.models import (
     Favorite,
     Ingredient,
     Recipe,
+    RecipeIngredients,
     ShoppingCart,
     Tag,
-    RecipeIngredients,
 )
-from foodgram.inlines import RecipeIngredientInline
 
 
 @admin.register(Tag)

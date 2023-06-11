@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.core.validators import MinValueValidator, RegexValidator
 from django.db import models
 
@@ -31,6 +32,7 @@ class Tag(NameModel):
     class Meta:
         verbose_name = 'тег'
         verbose_name_plural = 'теги'
+        ordering = ('name',)
 
 
 class Ingredient(NameModel):
@@ -39,6 +41,7 @@ class Ingredient(NameModel):
     class Meta:
         verbose_name = 'ингредиент'
         verbose_name_plural = 'ингредиенты'
+        ordering = ('name',)
 
 
 class Recipe(NameModel):
@@ -57,7 +60,7 @@ class Recipe(NameModel):
     text = models.TextField('описание')
     cooking_time = models.PositiveSmallIntegerField(
         'время приготовления (в минутах)',
-        validators=(MinValueValidator(1),),
+        validators=(MinValueValidator(settings.MIN_FIELD_RESTRICTION),),
     )
 
     class Meta:
@@ -80,7 +83,7 @@ class RecipeIngredients(models.Model):
     )
     amount = models.PositiveIntegerField(
         'количество',
-        validators=(MinValueValidator(1),),
+        validators=(MinValueValidator(settings.MIN_FIELD_RESTRICTION),),
     )
 
     class Meta:
@@ -93,6 +96,7 @@ class RecipeIngredients(models.Model):
             ),
         ]
         default_related_name = 'recipe_ingredients'
+        ordering = ('-id',)
 
     def __str__(self):
         return f'В рецепте {self.recipe} содержится {self.ingredient}'
@@ -127,6 +131,8 @@ class Favorite(UserRecipeModel):
             ),
         )
 
+    ordering = ('-id',)
+
     def __str__(self):
         return f'{self.user} добавил рецепт {self.recipe} в избранное'
 
@@ -143,6 +149,7 @@ class ShoppingCart(UserRecipeModel):
                 name='unique_shopping_list_recipe',
             ),
         )
+        ordering = ('-id',)
 
     def __str__(self):
         return f'Рецепт {self.recipe} в списке покупок у {self.user}'

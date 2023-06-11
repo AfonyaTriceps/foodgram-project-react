@@ -1,3 +1,4 @@
+from django.shortcuts import get_object_or_404
 from rest_framework import permissions, status
 from rest_framework.response import Response
 
@@ -13,38 +14,15 @@ class FollowView(CreateDestroyListViewSet):
     permission_classes = (permissions.IsAuthenticated,)
     pagination_class = None
 
-    def post(self, request, **kwargs):
+    def post(self, request, pk):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        if request.user.id == kwargs.get('pk'):
-            return Response(
-                {'detail': 'Вы не можете подписаться на себя!'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if Follow.objects.filter(
-            user=request.user,
-            author_id=kwargs.get('pk'),
-        ).exists():
-            return Response(
-                {'detail': 'Вы уже подписаны на этого пользователя!'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        serializer.save(user=request.user, author_id=kwargs.get('pk'))
+        serializer.save(user=request.user, author_id=pk)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-    def delete(self, request, **kwargs):
-        try:
-            Follow.objects.get(
-                user=request.user,
-                author_id=kwargs.get('pk'),
-            ).delete()
-            return Response(status=status.HTTP_204_NO_CONTENT)
-        except Follow.DoesNotExist:
-            return Response(
-                {'detail': 'Вы не подписаны на этого пользователя!'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+    def delete(self, request, pk):
+        get_object_or_404(Follow, user=request.user, author_id=pk).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class FollowListView(ListViewSet):
@@ -54,7 +32,7 @@ class FollowListView(ListViewSet):
     queryset = Follow.objects.all()
 
     def get_queryset(self):
-        return Follow.objects.filter(user=self.request.user)
+        return self.request.user.follower.all()
 
     def get(self, request, *args, **kwargs):
         return self.list(request, *args, **kwargs)
