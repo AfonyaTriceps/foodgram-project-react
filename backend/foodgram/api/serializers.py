@@ -46,24 +46,17 @@ class FollowSerializer(serializers.ModelSerializer):
         )
 
     def validate(self, data):
-        user = self.context['request'].user
-        author_id = self.context['view'].kwargs['pk']
+        user = self.context.get('request').user
+        author_id = self.context.get('view').kwargs.get('pk')
         if user.id == author_id:
             raise serializers.ValidationError(
                 'Вы не можете подписаться на себя!',
             )
-        if Follow.objects.filter(user=user, author_id=author_id).exists():
+        if user.following.filter(author_id=author_id).exists():
             raise serializers.ValidationError(
                 'Вы уже подписаны на этого пользователя!',
             )
         return data
-
-    def validate_following(self, author):
-        if self.context.get('request').user == author:
-            raise serializers.ValidationError(
-                'Вы не можете подписаться на самого себя!',
-            )
-        return author
 
     def get_is_subscribed(self, obj):
         user = self.context.get('request').user
