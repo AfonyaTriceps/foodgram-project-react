@@ -84,6 +84,7 @@ jobs:
           script: |
             sudo docker-compose stop backend
             sudo docker-compose rm backend
+            sudo docker-compose pull backend
             rm .env
             touch .env
             
