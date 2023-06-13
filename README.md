@@ -1,5 +1,7 @@
 # Проект Foodgram
 
+![example workflow](https://github.com/AfonyaTriceps/foodgram-project-react/actions/workflows/main.yml/badge.svg)
+
 * Проект Foodgram собирает рецепты пользователей.
 * Рецепты делятся на различные теги.
 * Произведению может быть присвоен жанр из списка предустановленных.
